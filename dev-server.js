@@ -79,8 +79,9 @@ if (!apiKey) {
 
 console.log(`🔑 Groq key: ${apiKey.slice(0, 10)}...${apiKey.slice(-4)}`)
 
-// ── Import & serve the handler ────────────────────────────────────────────────
-const { default: handler } = await import('./api/generate.js')
+// ── Import & serve the handlers ────────────────────────────────────────────────
+const { default: generateHandler } = await import('./api/generate.js')
+const { default: imageHandler } = await import('./api/image.js')
 
 const PORT = 3000
 
@@ -96,10 +97,16 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'Invalid JSON body' }))
         return
       }
-      handler(req, res)
+      generateHandler(req, res)
     })
     return
   }
+
+  if (req.url.startsWith('/api/image')) {
+    imageHandler(req, res)
+    return
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ error: 'Not found' }))
 })

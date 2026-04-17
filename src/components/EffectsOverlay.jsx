@@ -154,7 +154,7 @@ export default function EffectsOverlay({ effects = [] }) {
   if (!mounted || !effects || effects.length === 0) return null;
 
   return (
-    <div className="absolute inset-0 z-0 pointer-events-none">
+    <div className="absolute inset-0 z-30 pointer-events-none">
       {effects.includes('rain') && <Rain />}
       {effects.includes('snow') && <Snow />}
       {effects.includes('dust') && <Dust />}
