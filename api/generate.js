@@ -3,7 +3,7 @@ import { SYSTEM_PROMPT, buildUserPrompt } from '../src/lib/prompts.js'
 // Groq is OpenAI-compatible and completely free (no credit card needed)
 // Get your key at: https://console.groq.com/keys
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_MODEL = 'llama-3.3-70b-versatile'
+const GROQ_MODEL = 'llama-3.1-8b-instant'
 
 const MAX_MOOD_LENGTH = 500
 const MIN_MOOD_LENGTH = 2

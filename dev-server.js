@@ -82,6 +82,7 @@ console.log(`🔑 Groq key: ${apiKey.slice(0, 10)}...${apiKey.slice(-4)}`)
 // ── Import & serve the handlers ────────────────────────────────────────────────
 const { default: generateHandler } = await import('./api/generate.js')
 const { default: imageHandler } = await import('./api/image.js')
+const { default: transcribeHandler } = await import('./api/transcribe.js')
 
 const PORT = 3000
 
@@ -104,6 +105,11 @@ const server = createServer((req, res) => {
 
   if (req.url.startsWith('/api/image')) {
     imageHandler(req, res)
+    return
+  }
+
+  if (req.url.startsWith('/api/transcribe')) {
+    transcribeHandler(req, res)
     return
   }
 

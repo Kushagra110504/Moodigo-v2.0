@@ -1,16 +1,87 @@
 import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Mic, Square } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function MoodInput({ onSubmit, isLoading }) {
   const [mood, setMood] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
   const textareaRef = useRef(null)
+
+  const handleStartRecording = async (e) => {
+    e.preventDefault()
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        stream.getTracks().forEach(track => track.stop())
+        await processRecording(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+    } catch (err) {
+      console.error('Microphone access denied:', err)
+      alert("Microphone access is required to use the voice feature.")
+    }
+  }
+
+  const handleStopRecording = (e) => {
+    e.preventDefault()
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const processRecording = async (audioBlob) => {
+    setIsTranscribing(true)
+    try {
+      // Convert blob to base64
+      const reader = new FileReader()
+      reader.readAsDataURL(audioBlob)
+      reader.onloadend = async () => {
+        const base64Data = reader.result.split(',')[1] // remove data:audio/webm;base64,
+        
+        const res = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioBase64: base64Data })
+        })
+
+        if (!res.ok) {
+          throw new Error('Transcription failed')
+        }
+
+        const data = await res.json()
+        if (data.text) {
+          setMood(prev => prev ? `${prev} ${data.text}` : data.text)
+        }
+        setIsTranscribing(false)
+      }
+    } catch (err) {
+      console.error('Transcription error:', err)
+      setIsTranscribing(false)
+    }
+  }
 
   const handleSubmit = (e) => {
     e.preventDefault()
     const trimmed = mood.trim()
-    if (!trimmed || isLoading) return
+    if (!trimmed || isLoading || isTranscribing) return
     onSubmit(trimmed)
   }
 
@@ -67,15 +138,40 @@ export default function MoodInput({ onSubmit, isLoading }) {
               placeholder="e.g. A quiet rainy morning, anxious energy..."
               maxLength={500}
               rows={4}
-              disabled={isLoading}
+              disabled={isLoading || isRecording || isTranscribing}
               className={clsx(
                 'w-full bg-transparent px-8 py-8 text-storybook-dark placeholder-storybook-dark/30',
                 'font-body text-xl resize-none outline-none focus:ring-0 relative z-10',
-                isLoading ? 'opacity-50 cursor-not-allowed' : '',
+                (isLoading || isTranscribing) ? 'opacity-50 cursor-not-allowed' : '',
               )}
             />
-            {/* Elegant Character counter */}
-            <div className="absolute bottom-5 right-7 text-xs font-medium tracking-widest text-storybook-dark/40 z-10">
+            {/* Elegant Character counter & Microphone Button */}
+            <div className="absolute bottom-5 left-7 z-10 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={isRecording ? handleStopRecording : handleStartRecording}
+                disabled={isLoading || isTranscribing}
+                className={clsx(
+                  "p-3 rounded-full transition-all duration-300 shadow-sm flex items-center gap-2",
+                  isRecording 
+                    ? "bg-red-500 text-white animate-pulse" 
+                    : "bg-storybook-dark/5 text-storybook-dark hover:bg-storybook-dark/10"
+                )}
+                title={isRecording ? "Stop Recording" : "Hold or Tap to Vent"}
+              >
+                {isRecording ? <Square fill="currentColor" size={16} /> : <Mic size={18} />}
+                {isRecording && <span className="text-xs font-semibold px-1">Recording...</span>}
+              </button>
+              
+              {isTranscribing && (
+                <div className="flex items-center gap-2 text-xs font-medium text-storybook-dark/60 animate-pulse">
+                  <Loader2 size={12} className="animate-spin" />
+                  Transcribing...
+                </div>
+              )}
+            </div>
+
+            <div className="absolute bottom-6 right-7 text-xs font-medium tracking-widest text-storybook-dark/40 z-10">
               {charCount} / 500
             </div>
           </div>
