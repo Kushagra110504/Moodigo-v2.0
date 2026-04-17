@@ -1,7 +1,9 @@
+import { generateScale, buildChord } from './musicTheory.js';
+
 let audioCtx = null;
 let activeNodes = [];
 let fadeOutTimer = null;
-let activeIntervals = []; // Array to track custom music intervals
+let activeIntervals = []; 
 
 export function initAudio() {
   if (!audioCtx) {
@@ -18,7 +20,6 @@ function stopAudio() {
     fadeOutTimer = null;
   }
   
-  // Clear all musical loops
   activeIntervals.forEach(interval => clearInterval(interval));
   activeIntervals = [];
   
@@ -29,7 +30,6 @@ function stopAudio() {
   activeNodes = [];
 }
 
-// Generate an impulse response for the Convolver (Reverb)
 function createReverbBuffer(audioCtx, reverbAmount = 0.5) {
   const duration = 1 + (reverbAmount * 3);
   const sampleRate = audioCtx.sampleRate;
@@ -46,111 +46,133 @@ function createReverbBuffer(audioCtx, reverbAmount = 0.5) {
   return impulse;
 }
 
+function createPingPongDelay(ctx, destination, delayTime = 0.4, feedback = 0.4) {
+  const merger = ctx.createChannelMerger(2);
+  const leftDelay = ctx.createDelay();
+  const rightDelay = ctx.createDelay();
+  const leftFeedback = ctx.createGain();
+  const rightFeedback = ctx.createGain();
+
+  leftDelay.delayTime.value = delayTime;
+  rightDelay.delayTime.value = delayTime;
+  leftFeedback.gain.value = feedback;
+  rightFeedback.gain.value = feedback;
+
+  // Cross feedback loop
+  leftDelay.connect(leftFeedback);
+  leftFeedback.connect(rightDelay);
+  
+  rightDelay.connect(rightFeedback);
+  rightFeedback.connect(leftDelay);
+
+  // Into merger
+  leftDelay.connect(merger, 0, 0);
+  rightDelay.connect(merger, 0, 1);
+  merger.connect(destination);
+
+  activeNodes.push(leftDelay, rightDelay, leftFeedback, rightFeedback, merger);
+  
+  // Return the entry points for left/right bouncing
+  return { leftDelay, rightDelay };
+}
+
 /* =======================================================================
                   INSTRUMENT SYNTHESIS ENGINE
 ======================================================================= */
 
-function playPianoNote(ctx, destination, freq, time, duration = 3) {
-  const osc1 = ctx.createOscillator(); 
-  const osc2 = ctx.createOscillator(); 
-  osc1.type = 'triangle';
-  osc2.type = 'sine';
-  osc1.frequency.setValueAtTime(freq, time);
-  osc2.frequency.setValueAtTime(freq * 2.01, time);
-  
+function playDrone(ctx, destination, baseFreq) {
+  const time = ctx.currentTime;
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  
-  const gain1 = ctx.createGain();
-  const gain2 = ctx.createGain();
-  const masterInstGain = ctx.createGain();
-  masterInstGain.gain.value = 0.55; 
-
-  gain1.gain.setValueAtTime(0, time);
-  gain1.gain.linearRampToValueAtTime(1, time + 0.02);
-  gain1.gain.exponentialRampToValueAtTime(0.001, time + duration);
-
-  gain2.gain.setValueAtTime(0, time);
-  gain2.gain.linearRampToValueAtTime(0.5, time + 0.01);
-  gain2.gain.exponentialRampToValueAtTime(0.001, time + duration * 0.5);
-
-  filter.frequency.setValueAtTime(3000, time); 
-  filter.frequency.exponentialRampToValueAtTime(600, time + duration);
-
-  osc1.connect(gain1); gain1.connect(filter);
-  osc2.connect(gain2); gain2.connect(filter);
-  filter.connect(masterInstGain);
-  masterInstGain.connect(destination);
-
-  osc1.start(time); osc2.start(time);
-  osc1.stop(time + duration); osc2.stop(time + duration);
-  
-  activeNodes.push(osc1, osc2, gain1, gain2, filter, masterInstGain);
-}
-
-function playLofiChord(ctx, destination, freqs, time, duration = 4) {
-  const chordFilter = ctx.createBiquadFilter();
-  chordFilter.type = 'lowpass';
-  chordFilter.frequency.setValueAtTime(1500, time); 
+  filter.frequency.value = 400; // Deep, muffled
   
   const lfo = ctx.createOscillator();
-  lfo.frequency.value = 0.2;
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.05; // 20-second sweep
+  
   const lfoGain = ctx.createGain();
-  lfoGain.gain.value = 5; 
-  lfo.connect(lfoGain);
-  lfo.start(time); lfo.stop(time + duration);
+  lfoGain.gain.value = 600; // Sweep up by 600Hz
+  lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+  
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(0, time);
+  masterGain.gain.linearRampToValueAtTime(0.15, time + 5);
 
-  const chordGain = ctx.createGain();
-  chordGain.gain.setValueAtTime(0, time);
-  chordGain.gain.linearRampToValueAtTime(0.25, time + 1); 
-  chordGain.gain.setValueAtTime(0.25, time + duration - 1);
-  chordGain.gain.linearRampToValueAtTime(0.0001, time + duration);
-
-  freqs.forEach(freq => {
+  [baseFreq, baseFreq * 1.01, baseFreq * 0.5].forEach(freq => {
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.value = freq;
-    lfoGain.connect(osc.detune);
-
-    const osc2 = ctx.createOscillator(); 
-    osc2.type = 'sawtooth';
-    osc2.frequency.value = freq;
-    osc2.detune.value = 15;
-
-    osc.connect(chordFilter);
-    osc2.connect(chordFilter);
-    osc.start(time); osc.stop(time + duration);
-    osc2.start(time); osc2.stop(time + duration);
-    
-    activeNodes.push(osc, osc2);
+    osc.connect(filter);
+    osc.start(time);
+    activeNodes.push(osc);
   });
 
-  chordFilter.connect(chordGain);
-  chordGain.connect(destination);
-  activeNodes.push(chordFilter, lfo, lfoGain, chordGain);
+  lfo.start(time);
+  filter.connect(masterGain);
+  masterGain.connect(destination);
+  
+  activeNodes.push(filter, lfo, lfoGain, masterGain);
 }
 
-function playAcousticPluck(ctx, destination, freq, time) {
-  const osc = ctx.createOscillator();
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(freq, time);
-  
+function playProceduralChord(ctx, destination, freqs, time, duration = 4, isSmooth = true) {
   const filter = ctx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.Q.value = 1.5;
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(isSmooth ? 800 : 2500, time);
+  if (isSmooth) {
+    filter.frequency.linearRampToValueAtTime(1500, time + duration/2);
+    filter.frequency.linearRampToValueAtTime(800, time + duration);
+  } else {
+    filter.frequency.exponentialRampToValueAtTime(400, time + duration);
+  }
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, time);
+  if (isSmooth) {
+    gain.gain.linearRampToValueAtTime(0.2, time + duration * 0.3);
+    gain.gain.setValueAtTime(0.2, time + duration * 0.7);
+    gain.gain.linearRampToValueAtTime(0.0001, time + duration);
+  } else {
+    gain.gain.linearRampToValueAtTime(0.3, time + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+  }
+
+  freqs.forEach(freq => {
+    const osc = ctx.createOscillator();
+    osc.type = isSmooth ? 'triangle' : 'square';
+    osc.frequency.value = freq;
+    osc.connect(filter);
+    osc.start(time);
+    osc.stop(time + duration);
+    activeNodes.push(osc);
+  });
+
+  filter.connect(gain);
+  gain.connect(destination);
+  activeNodes.push(filter, gain);
+}
+
+function playArpNote(ctx, delays, destination, freq, time) {
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(freq, time);
   
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0, time);
-  gain.gain.linearRampToValueAtTime(0.6, time + 0.01); 
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 1.5);
+  gain.gain.linearRampToValueAtTime(0.4, time + 0.02); 
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 1.2);
 
-  filter.frequency.setValueAtTime(3000, time);
-  filter.frequency.exponentialRampToValueAtTime(500, time + 0.5);
-
-  osc.connect(gain); gain.connect(filter); filter.connect(destination);
-  osc.start(time); osc.stop(time + 1.5);
+  osc.connect(gain); 
+  gain.connect(destination);
   
-  activeNodes.push(osc, filter, gain);
+  // Tap into ping-pong delay occasionally
+  if (Math.random() > 0.5) {
+     gain.connect(delays.leftDelay);
+  } else {
+     gain.connect(delays.rightDelay);
+  }
+
+  osc.start(time); osc.stop(time + 1.2);
+  activeNodes.push(osc, gain);
 }
 
 export function playSoundscape(neuroConfig) {
@@ -164,23 +186,26 @@ export function playSoundscape(neuroConfig) {
     reverbAmount = 0.5,
     masterGain = 0.4,
     binauralGain = 0.08,
-    emotionalTag = 'peaceful'
+    musicalKey = 'C',     // Defaults
+    scaleType = 'major',
+    bpm = 60,
+    progression = [1, 4, 6, 5]
   } = neuroConfig;
+
+  console.log('[AudioEngine] Booting procedural music', { musicalKey, scaleType, bpm, progression })
 
   const now = audioCtx.currentTime;
 
-  // --- Master output & Reverb ---
+  // --- Output & Reverb Routing ---
   const mainOut = audioCtx.createGain();
   mainOut.gain.setValueAtTime(0, now);
   mainOut.gain.linearRampToValueAtTime(masterGain, now + 5);
   mainOut.connect(audioCtx.destination);
   activeNodes.push(mainOut);
 
-  // Setup Convolver for Reverb
   const convolver = audioCtx.createConvolver();
   convolver.buffer = createReverbBuffer(audioCtx, reverbAmount);
   
-  // Dry/Wet Reverb Mix
   const dryGain = audioCtx.createGain();
   const wetGain = audioCtx.createGain();
   dryGain.gain.value = 1 - reverbAmount;
@@ -197,6 +222,11 @@ export function playSoundscape(neuroConfig) {
   sceneMix.connect(convolver);
   activeNodes.push(sceneMix);
 
+  // --- Ping-Pong Delay Engine ---
+  // Sync delay to the specified BPM (e.g. 60bpm = 1000ms. Dotted 8th note delay is common 0.75 * beat duration)
+  const beatDuration = 60 / bpm;
+  const delays = createPingPongDelay(audioCtx, sceneMix, beatDuration * 0.75, 0.4);
+
   // --- Dynamic Spatial Panner ---
   const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : audioCtx.createGain();
   if (audioCtx.createStereoPanner) {
@@ -210,93 +240,56 @@ export function playSoundscape(neuroConfig) {
   panner.connect(sceneMix);
   activeNodes.push(panner);
 
-  // --- Musical Generation logic based on emotionalTag ---
-  const tag = (emotionalTag || '').toLowerCase();
+  // --- PROCEDURAL GENERATION: Math over Hardcoding ---
+  const validProgression = progression && progression.length ? progression : [1, 4, 6, 5];
+  const scaleFreqs = generateScale(musicalKey, scaleType);
   
-  // 1. Sad / Deep / Reflective (Pianos)
-  if (['melancholic', 'grief', 'lonely', 'tender'].includes(tag)) {
-    const pianoNotes = [220.00, 261.63, 329.63, 440.00, 329.63, 261.63]; // A Minor arp
-    let noteIdx = 0;
-    const interval = setInterval(() => {
-      if (audioCtx.state === 'closed') return clearInterval(interval);
-      playPianoNote(audioCtx, panner, pianoNotes[noteIdx % pianoNotes.length], audioCtx.currentTime);
-      noteIdx++;
-    }, 2000);
-    activeIntervals.push(interval);
-  } 
-  // 2. Chilled / Nostalgic (Lo-fi Chords + soft kick)
-  else if (['nostalgic', 'peaceful'].includes(tag)) {
-    const chords = [
-      [174.61, 220.00, 261.63, 329.63], // Fmaj7
-      [164.81, 196.00, 246.94, 293.66], // Em7
-    ];
-    let beatStep = 0;
-    const interval = setInterval(() => {
-      if (audioCtx.state === 'closed') return clearInterval(interval);
-      if (beatStep % 4 === 0) {
-        playLofiChord(audioCtx, panner, chords[(beatStep / 4) % chords.length], audioCtx.currentTime, 3.5);
-      }
-      beatStep++;
-    }, 1000);
-    activeIntervals.push(interval);
-  } 
-  // 3. Bright / Acoustic (sunny plucks)
-  else if (['joyful', 'proud', 'energetic', 'awestruck'].includes(tag)) {
-    const pluckNotes = [261.63, 293.66, 329.63, 392.00, 440.00]; // C Major Penta
-    const interval = setInterval(() => {
-      if (audioCtx.state === 'closed') return clearInterval(interval);
-      const numNotes = Math.floor(Math.random() * 3) + 1;
-      for(let i=0; i<numNotes; i++) {
-        setTimeout(() => {
-           const note = pluckNotes[Math.floor(Math.random() * pluckNotes.length)];
-           playAcousticPluck(audioCtx, panner, note * (Math.random() > 0.8 ? 2 : 1), audioCtx.currentTime);
-        }, i * 300);
-      }
-    }, 2500);
-    activeIntervals.push(interval);
-  } 
-  // 4. Retro / Intense / Electric (16-bit Synth Arps)
-  else {
-    const arpNotes = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63, 261.63, 196.00];
-    let step = 0;
-    const interval = setInterval(() => {
-      if (audioCtx.state === 'closed') return clearInterval(interval);
-      const osc = audioCtx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.value = arpNotes[step % arpNotes.length];
+  // 1. Ambient Evolving Drone (replaces static drone)
+  playDrone(audioCtx, panner, scaleFreqs[0] / 2); // Root note, lowered octave
 
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = 'lowpass'; filter.frequency.value = 1500;
-      const g = audioCtx.createGain();
+  // 2. Procedural Chords Sequence
+  // Play a new chord at the start of every bar (4 beats)
+  let barStep = 0;
+  const chordInterval = setInterval(() => {
+    if (audioCtx.state === 'closed') return clearInterval(chordInterval);
+    const degree = validProgression[barStep % validProgression.length];
+    const freqs = buildChord(scaleFreqs, degree);
+    const duration = beatDuration * 4; // Chord rings out for a full bar
+    playProceduralChord(audioCtx, panner, freqs, audioCtx.currentTime, duration, bpm < 70); 
+    barStep++;
+  }, beatDuration * 4000); // Wait 4 beats in ms
+  activeIntervals.push(chordInterval);
+
+  // 3. Euclidean Arpeggiator Plucks
+  let arpStep = 0;
+  const arpInterval = setInterval(() => {
+    if (audioCtx.state === 'closed') return clearInterval(arpInterval);
+    
+    // Play sporadically (Euclidean approximation)
+    if (Math.random() > 0.4) {
+      // Pick a random note from the chord currently playing
+      const currentDegree = validProgression[barStep % validProgression.length];
+      const freqs = buildChord(scaleFreqs, currentDegree);
       
-      osc.connect(filter); filter.connect(g); g.connect(panner);
-      
-      const t = audioCtx.currentTime;
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(0.05, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      // Select a random note from the chord and bump it up an octave
+      const arpFreq = freqs[Math.floor(Math.random() * freqs.length)] * 2;
+      playArpNote(audioCtx, delays, panner, arpFreq, audioCtx.currentTime);
+    }
+    arpStep++;
+  }, beatDuration * 500); // 8th notes (half a beat)
+  activeIntervals.push(arpInterval);
 
-      osc.start(t); osc.stop(t + 0.15);
-      activeNodes.push(osc, filter, g);
-      step++;
-    }, 150);
-    activeIntervals.push(interval);
-  }
 
-  // --- Therapeutic Binaural Beats ---
-  // Left Ear Oscillator
+  // --- Therapeutic Binaural Beats (Layered underneath) ---
   const oscL = audioCtx.createOscillator();
   oscL.type = 'sine';
   oscL.frequency.value = baseFrequency;
   
-  // Right Ear Oscillator (creates the interference beat inside the brain)
   const oscR = audioCtx.createOscillator();
   oscR.type = 'sine';
   oscR.frequency.value = baseFrequency + binauralHz;
 
   const merger = audioCtx.createChannelMerger(2);
-  
-  // Hard pan using channel routing -> Merges oscL to left channel (0), oscR to right channel (1)
   oscL.connect(merger, 0, 0);
   oscR.connect(merger, 0, 1);
 

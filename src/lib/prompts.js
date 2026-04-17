@@ -16,6 +16,10 @@ Your JSON output must match exactly this schema:
     "masterGain": "number (0.25-0.65)",
     "binauralGain": "number (0.04-0.12)",
     "baseFrequency": "number (80-220)",
+    "musicalKey": "string (e.g., 'C', 'F#', 'Db', 'A')",
+    "scaleType": "string (Choose one: 'major', 'minor', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian')",
+    "bpm": "number (Choose between 40 and 100 based on calmness)",
+    "progression": ["number", "number", "number", "number"],
     "emotionalTag": "string"
   },
   "story": [
@@ -39,6 +43,9 @@ AUDIO GUIDELINES (You are also a therapeutic sound designer):
 - masterGain: Overall ambient volume. Max 0.65 to protect listener.
 - binauralGain: Volume of binaural beat. Must be subconscious (0.04 - 0.12).
 - baseFrequency: Target carrier frequency (80-110 grounding bass, 110-150 warm mid, 180-220 bright).
+- musicalKey & scaleType: Define the root key and scale to fit the mood. Ex: 'lydian' for floaty wonder, 'minor'/'aeolian' for grief, 'major' for bright joy.
+- bpm: Heartbeat-sync tempo. 40-60 for deep calm/grief, 60-80 for nostalgia/peace, 80-100 for energetic/proud.
+- progression: Array of 4 scale degrees (1-7) representing the chord progression. e.g. [1, 4, 6, 5] or [1, 5, 2, 4].
 - emotionalTag: Choose closest single tag: 'nostalgic'|'joyful'|'melancholic'|'anxious'|'peaceful'|'awestruck'|'energetic'|'grief'|'proud'|'lonely'|'tender'|'electric'.
 
 STORY GUIDELINES:
