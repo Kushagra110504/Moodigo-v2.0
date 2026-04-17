@@ -26,10 +26,16 @@ export default async function handler(req, res) {
 
   try {
     // 1. Read incoming JSON body containing base64 audio
+    // Compatibility: Local dev-server uses raw streams, Vercel auto-parses req.body
     let bodyData = ''
-    for await (const chunk of req) {
-      bodyData += chunk
+    if (req.body) {
+      bodyData = typeof req.body === 'object' ? JSON.stringify(req.body) : req.body
+    } else {
+      for await (const chunk of req) {
+        bodyData += chunk
+      }
     }
+    
     const { audioBase64 } = JSON.parse(bodyData)
     
     if (!audioBase64) {
