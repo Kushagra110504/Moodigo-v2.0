@@ -3,7 +3,14 @@ import { SYSTEM_PROMPT, buildUserPrompt } from '../src/lib/prompts.js'
 // Groq is OpenAI-compatible and completely free (no credit card needed)
 // Get your key at: https://console.groq.com/keys
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_MODEL = 'llama-3.1-8b-instant'
+// Models currently supported on Groq with structured JSON output support
+const CANDIDATE_MODELS = [
+  process.env.GROQ_MODEL,
+  'openai/gpt-oss-20b',
+  'openai/gpt-oss-120b',
+  'llama-3.3-70b-versatile',
+  'qwen/qwen3.8-27b',
+].filter(Boolean)
 
 const MAX_MOOD_LENGTH = 500
 const MIN_MOOD_LENGTH = 2
@@ -102,29 +109,47 @@ export default async function handler(req, res) {
   }
 
   try {
-    const groqRes = await fetch(GROQ_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: buildUserPrompt(mood.trim()) },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.9,
-        max_tokens: 4096,
-      }),
-    })
+    let groqRes = null
+    let lastErrorMsg = ''
 
-    if (!groqRes.ok) {
+    for (const model of CANDIDATE_MODELS) {
+      groqRes = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: buildUserPrompt(mood.trim()) },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.9,
+          max_tokens: 4096,
+        }),
+      })
+
+      if (groqRes.ok) {
+        break
+      }
+
       const errData = await groqRes.json().catch(() => ({}))
-      const message = errData?.error?.message || `Groq API error: ${groqRes.status}`
+      lastErrorMsg = errData?.error?.message || `Groq API error: ${groqRes.status}`
+
+      // If the model does not exist or user doesn't have access, try next candidate
+      if (groqRes.status === 404 || errData?.error?.code === 'model_not_found') {
+        console.warn(`Groq model '${model}' not available (${lastErrorMsg}). Trying next model...`)
+        continue
+      }
+
+      break
+    }
+
+    if (!groqRes || !groqRes.ok) {
       res.writeHead(502, { ...headers, 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: message }))
+      res.end(JSON.stringify({ error: lastErrorMsg || 'Groq API request failed' }))
       return
     }
 

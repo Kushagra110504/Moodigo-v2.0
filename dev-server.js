@@ -79,18 +79,29 @@ if (!apiKey) {
 
 console.log(`🔑 Groq key: ${apiKey.slice(0, 10)}...${apiKey.slice(-4)}`)
 
-// ── Import & serve the handlers ────────────────────────────────────────────────
-const { default: generateHandler } = await import('./api/generate.js')
-const { default: imageHandler } = await import('./api/image.js')
-const { default: transcribeHandler } = await import('./api/transcribe.js')
+// ── Dynamic handler loader (supports live reloads during dev) ─────────────────
+async function handleGenerate(req, res) {
+  const { default: handler } = await import(`./api/generate.js?t=${Date.now()}`)
+  return handler(req, res)
+}
+
+async function handleImage(req, res) {
+  const { default: handler } = await import(`./api/image.js?t=${Date.now()}`)
+  return handler(req, res)
+}
+
+async function handleTranscribe(req, res) {
+  const { default: handler } = await import(`./api/transcribe.js?t=${Date.now()}`)
+  return handler(req, res)
+}
 
 const PORT = 3000
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   if (req.url === '/api/generate' || req.url === '/api/generate/') {
     let body = ''
     req.on('data', (chunk) => (body += chunk))
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         req.body = body ? JSON.parse(body) : {}
       } catch {
@@ -98,18 +109,36 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'Invalid JSON body' }))
         return
       }
-      generateHandler(req, res)
+      try {
+        await handleGenerate(req, res)
+      } catch (err) {
+        console.error('Error handling /api/generate:', err)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
     })
     return
   }
 
   if (req.url.startsWith('/api/image')) {
-    imageHandler(req, res)
+    try {
+      await handleImage(req, res)
+    } catch (err) {
+      console.error('Error handling /api/image:', err)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: err.message }))
+    }
     return
   }
 
   if (req.url.startsWith('/api/transcribe')) {
-    transcribeHandler(req, res)
+    try {
+      await handleTranscribe(req, res)
+    } catch (err) {
+      console.error('Error handling /api/transcribe:', err)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: err.message }))
+    }
     return
   }
 
